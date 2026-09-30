@@ -112,6 +112,25 @@ const CAREER_SKILL_MAP = {
 };
 const ALL_CAREERS = Object.keys(CAREER_SKILL_MAP);
 
+function getRelatedSkills(userSkills, limit = 5) {
+  const suggestions = new Set();
+  Object.values(CAREER_SKILL_MAP).forEach((careerSkills) => {
+    const overlap = careerSkills.some((s) => userSkills.some((us) => us.trim().toLowerCase() === s.trim().toLowerCase()));
+    if (overlap) {
+      careerSkills.forEach((s) => {
+        if (!userSkills.some((us) => us.trim().toLowerCase() === s.trim().toLowerCase())) suggestions.add(s);
+      });
+    }
+  });
+  return Array.from(suggestions).slice(0, limit);
+}
+
+function getMatchTier(pct) {
+  if (pct >= 60) return "ready";
+  if (pct >= 25) return "stretch";
+  return "explore";
+}
+
 /* ============================================================
    HELPERS — map DB rows to frontend shape and vice versa
    ============================================================ */
@@ -794,14 +813,22 @@ function StudentDashboard({ user, setUser, jobs, applications, applyToJob, updat
   const completion = profileCompletion(user);
   const primaryCareer = user.interests[0];
   const target = primaryCareer ? CAREER_SKILL_MAP[primaryCareer] : [];
-  const have = target.filter((s) => user.skills.includes(s));
-  const missing = target.filter((s) => !user.skills.includes(s));
+  const have = target.filter((s) => user.skills.some((us) => us.trim().toLowerCase() === s.trim().toLowerCase()));
+  const missing = target.filter((s) => !user.skills.some((us) => us.trim().toLowerCase() === s.trim().toLowerCase()));
   const readiness = target.length ? Math.round((have.length / target.length) * 100) : 0;
 
   const rankedJobs = useMemo(() => jobs.map((j) => {
-    const matched = j.skills.filter((s) => user.skills.includes(s));
+    const matched = j.skills.filter((s) => user.skills.some((us) => us.trim().toLowerCase() === s.trim().toLowerCase()));
     return { ...j, matchPct: Math.round((matched.length / j.skills.length) * 100), matched };
   }).sort((a, b) => b.matchPct - a.matchPct), [jobs, user.skills]);
+
+  const tieredJobs = useMemo(() => {
+  const groups = { ready: [], stretch: [], explore: [] };
+  rankedJobs.forEach((j) => groups[getMatchTier(j.matchPct)].push(j));
+  return groups;
+}, [rankedJobs]);
+
+const relatedSkills = useMemo(() => getRelatedSkills(user.skills), [user.skills]);
 
   const myApplications = applications.filter((a) => a.student_id === user.userId);
 
@@ -839,6 +866,22 @@ function StudentDashboard({ user, setUser, jobs, applications, applyToJob, updat
               {completion < 100 ? "Finish your portfolio and add more skills to reach 100%." : "Your profile is complete — recruiters see the full picture."}
             </p>
           </Section>
+
+          <Section icon={Sparkles} title="You may also like learning">
+  {relatedSkills.length === 0 && <p style={{ fontSize: 13.5, color: "var(--muted)" }}>Add a few skills to see personalized suggestions here.</p>}
+  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+    {relatedSkills.map((s) => (
+      <button
+        key={s}
+        className="sb-chip"
+        onClick={() => setField("skills", [...user.skills, s])}
+        style={{ cursor: "pointer", border: "none" }}
+      >
+        <Plus size={13} /> {s}
+      </button>
+    ))}
+  </div>
+</Section>
 
           <Section icon={Briefcase} title="Top recommended opportunities" action={<button className="sb-btn sb-btn-ghost sb-btn-sm" onClick={() => setActive("opportunities")}>View all</button>}>
             {rankedJobs.slice(0, 3).map((j) => <JobRow key={j.id} job={j} onApply={() => applyToJob(j, user)} applied={myApplications.some((a) => a.job_id === j.id)} />)}
@@ -911,10 +954,25 @@ function StudentDashboard({ user, setUser, jobs, applications, applyToJob, updat
       {active === "opportunities" && (
         <>
           <h1 style={{ fontSize: 23, margin: "0 0 4px" }}>Recommended internships & jobs</h1>
-          <p style={{ color: "var(--muted)", margin: "0 0 22px" }}>Ranked by how well your logged skills match each listing.</p>
-          {rankedJobs.map((j) => <JobRow key={j.id} job={j} onApply={() => applyToJob(j, user)} applied={myApplications.some((a) => a.job_id === j.id)} detailed />)}
-        </>
-      )}
+          <p style={{ color: "var(--muted)", margin: "0 0 22px" }}>Grouped by how ready you are for each opportunity.</p>
+
+        <Section icon={CheckCircle2} title="Best matches for you">
+      {tieredJobs.ready.length === 0 && <p style={{ fontSize: 13.5, color: "var(--muted)" }}>No strong matches yet — keep adding skills.</p>}
+      {tieredJobs.ready.map((j) => <JobRow key={j.id} job={j} onApply={() => applyToJob(j, user)} applied={myApplications.some((a) => a.job_id === j.id)} detailed />)}
+    </Section>
+
+    <Section icon={Target} title="Stretch opportunities — a few skills away">
+      {tieredJobs.stretch.length === 0 && <p style={{ fontSize: 13.5, color: "var(--muted)" }}>Nothing here right now.</p>}
+      {tieredJobs.stretch.map((j) => <JobRow key={j.id} job={j} onApply={() => applyToJob(j, user)} applied={myApplications.some((a) => a.job_id === j.id)} detailed />)}
+    </Section>
+
+    <Section icon={Sparkles} title="Explore — beginner-friendly options">
+      {tieredJobs.explore.length === 0 && <p style={{ fontSize: 13.5, color: "var(--muted)" }}>Nothing here right now.</p>}
+      {tieredJobs.explore.map((j) => <JobRow key={j.id} job={j} onApply={() => applyToJob(j, user)} applied={myApplications.some((a) => a.job_id === j.id)} detailed />)}
+    </Section>
+  </>
+)}
+
 
       {active === "applications" && (
         <>
